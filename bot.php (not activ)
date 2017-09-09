@@ -1,0 +1,104 @@
+<?
+$zeit = time();
+require_once "incl/function.php";
+$building = new building;
+$units = new units;
+require_once "config.php";
+$db = new db('w1');
+$reload = new reload;
+$foot = new foot;
+if(isset($_GET['action']) and $_GET['action'] == "create" and isset($_GET['init'])) {
+	for($i = 1; $i <= $_GET['init']; $i++) {
+		for($ifexist = 2; $ifexist != 0; ) {
+			$koord = showkoord('z');
+			$ifexist = $db->query("SELECT count(id) FROM `village` WHERE x = '".$koord['x']."' AND y = '".$koord['y']."'");	//Ob Bereits ein Dorf mit diesen Koordinaten
+			if($ifexist == 0) {
+				$ifexist = $db->query("SELECT count(id) FROM `mountain` WHERE x = '".$koord['x']."' AND y = '".$koord['y']."'");
+			}
+		}
+		$db->no_query("INSERT INTO `village` (`userid`, `name`, `x`, `y`, `wood_r`, `clay_r`, `iron_r`, `ress_times`, `main`,  `place`, `wood`, `clay`, `iron`, `farm`, `storage`, `spear`, `sword`, `axe`, `archer`) VALUES ('-1', 'Freies Dorf', '".$koord['x']."', '".$koord['y']."', '1000', '1000', '1000', '".time()."', '".rand(1,4)."', '1', '".rand(1,4)."', '".rand(1,4)."', '".rand(1,4)."', '".rand(1,4)."', '".rand(1,5)."', '".rand(1,50)."', '".rand(1,50)."', '".rand(1,50)."', '".rand(1,50)."')");
+		$vilid = $db->query("SELECT id FROM `village` ORDER BY id DESC LIMIT 1");
+		$reload->bh($vilid);
+		$reload->village_points($vilid);
+		$db->no_query("INSERT INTO `bot`(`village`, `level`, `update_time`) VALUES ('$vilid', '1', '".time()."')");
+	}
+}
+$result = $db->fetch("SELECT * FROM `bot`");
+while($bot = $result->fetch_array()) {
+	$village = $db->assoc("SELECT * FROM `village` WHERE id = '".$bot['village']."'");
+	if($village['userid'] != "-1") {
+		$db->no_query("DELETE FROM `bot` WHERE id = '".$bot['id']."'");
+	} else {
+		//Checkt die Rohstoffe
+		foot::generateres($village['id'],$village);
+		//Checkt alle Bauaufträge
+		foot::buildmaker($village['id'],$village);
+		//Checkt alle Rekrutierungen
+		foot::rekruitwache($village['id']);
+		//Forscht in der Schmiede
+		foot::forschemich($village['id'],$village);
+		//Berechnet die Händlerbewegungen
+		foot::moveahandlertovil($village['id']);
+		foot::moveahandler($village['id']);
+		//Updatet Zustimmung
+		foot::update_agrement($village['id'], $village);
+		//Beendet Truppenbewegungen
+		foot::dofightfrom($village['id'], $_SESSION['id'], $village);
+		foot::othervil($village['id']);
+		$village['max_food'] = getmaxfood($village['farm']);
+			//Baut Gebäude aus
+		$build = false;	//<- Damit maximal ein Gebäude ausgebaut wird
+		$main_factor = round(0.3*$village['main'])+1;
+		foreach($building->name as $item => $key) {
+			$village[$item] = $village[$item] + $db->query("SELECT count(id) FROM `build` WHERE village = '".$village['id']."' AND what = '$item'");
+			if($village[$item] < $building->level_max[$item] and ((round($building->food[$item]*($village[$item])*0.224))+$village['food']) < $village['max_food'] and round($building->wood[$item]*($village[$item]+1)) < $village['wood_r'] and round($building->iron[$item]*($village[$item]+1)) < $village['iron_r'] and round($building->clay[$item]*($village[$item]+1)) < $village['clay_r'] and !$build) {
+				$build = true;				
+				$db->no_query("UPDATE village SET wood_r = wood_r-'".round($building->wood[$item]*($village[$item]+1))."', iron_r = iron_r-'".round($building->iron[$item]*($village[$item]+1))."', clay_r = clay_r - '".round($building->clay[$item]*($village[$item]+1))."', food=food+'".round($building->food[$item]*($village[$item])*0.224)."' WHERE id = '".$village['id']."'");
+				$build_time = round($building->time[$item] * ($village[$item]+1) * 1.644);
+				$build_time = round(($build_time / $main_factor) / $game_speed)+1;
+				$end_time = $build_time + $zeit;
+				$db->no_query("INSERT into build (village,end_time,what,build_time) VALUES ('".$village['id']."','$end_time','".$item."','$build_time')");
+				$update_time = floor($build_time / 2);
+				$db->no_query("UPDATE `bot` SET `update_time` = '$update_time' WHERE id = '".$bot['id']."'");
+			}
+		}
+			//Macht Forschungen
+		$smith = false;
+		if($village['smith'] >= 1 and $db->query("SELECT count(id) FROM `smith` WHERE villageid = '".$bot['id']."'") <= 0) {
+			$village = $db->assoc("SELECT * FROM `village` WHERE id = '".$bot['village']."'");
+			foreach($units->name as $item => $key) {
+				if(!$smith and $village['s'.$item] < 5 and 1000 < $village['wood_r'] and 1000 < $village['clay_r'] and 1000 < $village['iron_r']) {
+				$smith = true;
+					$db->no_query("UPDATE village SET wood_r = wood_r-'1000', iron_r = iron_r-'1000', clay_r = clay_r - '1000' WHERE id = '".$bot['village']."'");
+					$update = round(12000 / (0.3 * $village['smith']) / $config['speed']);
+					$update = $update + $zeit;
+					$db->no_query("INSERT INTO `smith`(`villageid`, `unit`, `end_time`) VALUES ('".$bot['village']."', '$item', '$update')");
+				}
+			}
+		}
+			//Rekrutiert Truppen
+		$rekruit = false;
+		$unitn = array_values($units->name);
+		$unittorek = mt_rand(0, 9);
+		$item = $unitn[$unittorek];
+		$anzahl = mt_rand(1, 10);
+		$wood[$item] = $units->wood[$item] * $anzahl;
+		$clay[$item] = $units->clay[$item] * $anzahl;
+		$iron[$item] = $units->iron[$item] * $anzahl;
+		$food[$item] = $units->food[$item] * $anzahl;
+		$village = $db->assoc("SELECT * FROM `village` WHERE id = '".$bot['village']."'");
+		$village['max_food'] = getmaxfood($village['farm']);
+		if($wood[$item] < $village['wood_r'] and $iron[$item] < $village['iron_r'] and $clay[$item] < $village['clay_r'] and $food[$item] + $village['food'] < $village['max_food'] and $village['stable'] >= 1) {
+			$db->no_query("UPDATE village SET wood_r = wood_r-'".$wood[$item]."', clay_r = clay_r-'".$clay[$item]."', iron_r = iron_r-'".$iron[$item]."', food = food+'".$food[$item]."' WHERE id = '".$village['id']."'");
+			$wache_time = ($village['stable'] / 2.43);
+			createtrain($wache_time, $item,$anzahl,$units->type[$item]);
+		}
+	}	
+}
+?>
+<head>
+<title>Bot Datei nicht aufrufen!</title>
+</head>
+<body>
+<b>Bitte diese Datei nicht aufrufen!</b>
+</body>
