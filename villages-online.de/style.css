@@ -1,0 +1,30 @@
+body {
+  background-image: url("img/back.jpg");
+}
+.index {
+  border-radius: 3px;
+   margin:11px auto auto;
+  width: 1000px;;
+  background-color: #EFE3CB;
+  border-style: solid;
+  border-color: #C9B89B;
+}
+header {
+  text-align: center;
+}
+img {
+  width: 300px;
+  height: 280px;
+}
+section {
+  display: -webkit-flex;
+  display: flex;
+  text-align: center;
+}
+article {
+  padding-left: 133px;
+}
+a:link {color:#E82E2E; font-weight:bold; text-decoration:none}
+a:visited {color:#E82E2E; font-weight:bold; text-decoration:none}
+a:active {color:#E82E2E; font-weight:bold; text-decoration:none}
+a:hover {color:#fffb8e; font-weight:bold; text-decoration:underline}
